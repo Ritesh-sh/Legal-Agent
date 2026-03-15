@@ -56,8 +56,18 @@ public class LegalAgent {
     public QueryResponse processQuery(String sessionId, String query) {
         log.info("Processing query for session {}: {}", sessionId, query);
 
-        // Step 1: Check if query is legal
-        if (!intentService.isLegalQuery(query)) {
+        // Step 1: Augment query with previous context for search/intent
+        String lastQuery = conversationService.getLastUserQuery(sessionId);
+        String searchQuery = query;
+
+        // If this is a short follow-up question and we have history, augment it!
+        if (lastQuery != null && !lastQuery.trim().isEmpty() && query.split("\\s+").length < 15) {
+            searchQuery = query + " " + lastQuery;
+            log.info("Augmented search query with context: {}", searchQuery);
+        }
+
+        // Step 2: Check if query is legal (using augmented search query)
+        if (!intentService.isLegalQuery(searchQuery)) {
             log.info("Non-legal query detected: {}", query);
             return new QueryResponse(
                     IntentService.REJECTION_MESSAGE,
@@ -66,24 +76,24 @@ public class LegalAgent {
             );
         }
 
-        // Step 2: Add user message to conversation history
+        // Step 3: Add original user message to conversation history
         conversationService.addUserMessage(sessionId, query);
         String history = conversationService.formatHistory(sessionId);
 
-        // Step 3: Determine mode and select tools
+        // Step 4: Determine mode and select tools
         QueryResponse response;
         if (isSpecificSectionQuery(query)) {
             log.info("Mode: Legal Answer (specific section query)");
-            response = handleLegalAnswerMode(query, history);
+            response = handleLegalAnswerMode(query, searchQuery, history);
         } else if (isDiscussionQuery(query)) {
             log.info("Mode: Discussion");
-            response = handleDiscussionMode(query, history);
+            response = handleDiscussionMode(query, searchQuery, history);
         } else {
             log.info("Mode: Legal Answer (general legal query)");
-            response = handleLegalAnswerMode(query, history);
+            response = handleLegalAnswerMode(query, searchQuery, history);
         }
 
-        // Step 4: Add assistant response to history
+        // Step 5: Add assistant response to history
         conversationService.addAssistantMessage(sessionId, response.getAnswer());
 
         return response;
@@ -92,17 +102,17 @@ public class LegalAgent {
     /**
      * Legal Answer Mode: retrieve sections, rank with BM25, generate answer.
      */
-    private QueryResponse handleLegalAnswerMode(String query, String history) {
-        // Tool 1: Try direct section lookup
-        LegalDocument directSection = tryDirectSectionLookup(query);
+    private QueryResponse handleLegalAnswerMode(String originalQuery, String searchQuery, String history) {
+        // Tool 1: Try direct section lookup (using original query)
+        LegalDocument directSection = tryDirectSectionLookup(originalQuery);
         List<LegalDocument> retrievedDocs = new ArrayList<>();
 
         if (directSection != null) {
             retrievedDocs.add(directSection);
         }
 
-        // Tool 2: Search sections using BM25
-        List<LegalDocument> searchResults = retrievalService.searchSections(query);
+        // Tool 2: Search sections using BM25 (using augmented search query)
+        List<LegalDocument> searchResults = retrievalService.searchSections(searchQuery);
         for (LegalDocument doc : searchResults) {
             if (retrievedDocs.stream().noneMatch(d -> d.getId().equals(doc.getId()))) {
                 retrievedDocs.add(doc);
@@ -114,8 +124,8 @@ public class LegalAgent {
             retrievedDocs = retrievedDocs.subList(0, 3);
         }
 
-        // Generate answer using LLM
-        String answer = geminiService.generateResponse(query, history, retrievedDocs);
+        // Generate answer using LLM (using original query for the prompt)
+        String answer = geminiService.generateResponse(originalQuery, history, retrievedDocs);
 
         // Extract source references
         List<String> sources = retrievedDocs.stream()
@@ -123,7 +133,7 @@ public class LegalAgent {
                 .collect(Collectors.toList());
 
         // Tool 3: Google Scholar link
-        String scholarLink = scholarService.getScholarLink(query);
+        String scholarLink = scholarService.getScholarLink(searchQuery);
 
         return new QueryResponse(answer, sources, scholarLink);
     }
@@ -131,22 +141,22 @@ public class LegalAgent {
     /**
      * Discussion Mode: generate conversational explanation with optional context.
      */
-    private QueryResponse handleDiscussionMode(String query, String history) {
-        // Optionally retrieve some context
-        List<LegalDocument> context = retrievalService.searchSections(query);
+    private QueryResponse handleDiscussionMode(String originalQuery, String searchQuery, String history) {
+        // Optionally retrieve some context using augmented query
+        List<LegalDocument> context = retrievalService.searchSections(searchQuery);
 
         String answer;
         if (!context.isEmpty()) {
-            answer = geminiService.generateResponse(query, history, context);
+            answer = geminiService.generateResponse(originalQuery, history, context);
         } else {
-            answer = geminiService.generateDiscussionResponse(query, history);
+            answer = geminiService.generateDiscussionResponse(originalQuery, history);
         }
 
         List<String> sources = context.stream()
                 .map(doc -> doc.getActName() + " Section " + doc.getSectionNumber())
                 .collect(Collectors.toList());
 
-        String scholarLink = scholarService.getScholarLink(query);
+        String scholarLink = scholarService.getScholarLink(searchQuery);
 
         return new QueryResponse(answer, sources, scholarLink);
     }

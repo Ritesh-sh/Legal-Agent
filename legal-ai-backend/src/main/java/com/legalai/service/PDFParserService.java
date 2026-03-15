@@ -156,10 +156,11 @@ public class PDFParserService {
             // Try structured section extraction first
             List<LegalDocument> structured = extractSections(fullText, actAbbrev, actName, pdfFile.getName());
 
-            if (!structured.isEmpty()) {
+            // If we extracted very few sections relative to the document size, extraction likely failed.
+            if (structured.size() > 15 || (document.getNumberOfPages() <= 10 && !structured.isEmpty())) {
                 documents.addAll(structured);
             } else {
-                // Fallback: split by pages (ensures we never miss content)
+                log.warn("  --> Structured extraction poor for {} (got {} sections). Falling back to pages.", pdfFile.getName(), structured.size());
                 documents.addAll(extractByPages(document, actAbbrev, actName, pdfFile.getName()));
             }
         }
@@ -171,34 +172,32 @@ public class PDFParserService {
     //  Section extraction — tries multiple regex patterns common in Indian Acts
     // ======================================================================
     private List<LegalDocument> extractSections(String text, String actAbbrev, String actName, String sourceFile) {
-        List<LegalDocument> docs = new ArrayList<>();
-        Set<String> seenSections = new HashSet<>();
+        List<LegalDocument> bestDocs = new ArrayList<>();
 
         // Multiple patterns that appear in Indian legal act PDFs
         Pattern[] patterns = {
-            // "Section 420. Cheating …"  or  "Section 420 – Cheating …"
-            Pattern.compile("(?m)(?:^|\\n)\\s*(?:Section|SECTION|Sec\\.)\\s+(\\d+[A-Za-z]?)[\\.\\s:\\-–—]+\\s*([^\\n]{3,})"),
+            // "Section 420. Cheating …"  or  "Section 420 \n Cheating …"
+            Pattern.compile("(?mi)(?:^|\\n)\\s*(?:Section|Sec\\.)\\s+(\\d+[A-Za-z]?)[\\.\\s:\\-–—\\n]+\\s*([A-Z][^\\n]{3,})"),
             // "420. Cheating and …"  (number-dot-title)
             Pattern.compile("(?m)(?:^|\\n)\\s*(\\d+[A-Za-z]?)\\.\\s+([A-Z][^\\n]{3,})"),
             // "Article 14. Equality …"  (Constitution)
             Pattern.compile("(?m)(?:^|\\n)\\s*(?:Article|ARTICLE)\\s+(\\d+[A-Za-z]?)[\\.\\s:\\-–—]+\\s*([^\\n]{3,})"),
-            // "Chapter" lines sometimes precede sections — skip those with next pattern
             // "S. 420 Cheating"
-            Pattern.compile("(?m)(?:^|\\n)\\s*S\\.\\s*(\\d+[A-Za-z]?)[\\.\\s:\\-–—]+\\s*([^\\n]{3,})")
+            Pattern.compile("(?mi)(?:^|\\n)\\s*(?:S\\.|CHAPTER)\\s*(\\d+[A-Za-z]?)[\\.\\s:\\-–—]+\\s*([^\\n]{3,})")
         };
 
         for (Pattern pattern : patterns) {
             Matcher matcher = pattern.matcher(text);
             List<int[]> matchPositions = new ArrayList<>();
             List<String[]> matchGroups = new ArrayList<>();
+            Set<String> seenSections = new HashSet<>();
 
             while (matcher.find()) {
                 String sectionNum = matcher.group(1);
                 String title = matcher.group(2).trim();
 
                 // Skip dubious matches (too-short titles, page numbers, etc.)
-                if (title.length() < 3) continue;
-                if (title.matches("^\\d+$")) continue;
+                if (title.length() < 3 || title.matches("^\\d+$")) continue;
 
                 if (!seenSections.contains(sectionNum)) {
                     seenSections.add(sectionNum);
@@ -207,42 +206,36 @@ public class PDFParserService {
                 }
             }
 
+            List<LegalDocument> currentDocs = new ArrayList<>();
             // Extract content between section headings
             for (int i = 0; i < matchPositions.size(); i++) {
                 int start = matchPositions.get(i)[1]; // end of heading
-                int end;
-                if (i + 1 < matchPositions.size()) {
-                    end = matchPositions.get(i + 1)[0];
-                } else {
-                    end = Math.min(start + 2000, text.length());
-                }
+                int end = (i + 1 < matchPositions.size()) ? matchPositions.get(i + 1)[0] : Math.min(start + 2500, text.length());
 
-                String content = text.substring(start, end).trim();
-
-                // Clean up content
-                content = content.replaceAll("\\r", "");
-                content = content.replaceAll("\\n{3,}", "\n\n");
+                String content = text.substring(start, end).trim()
+                        .replaceAll("\\r", "")
+                        .replaceAll("\\n{3,}", "\n\n");
 
                 // Limit content length
-                if (content.length() > 1500) {
-                    content = content.substring(0, 1500) + "...";
+                if (content.length() > 2000) {
+                    content = content.substring(0, 2000) + "...";
                 }
 
                 String sectionNum = matchGroups.get(i)[0];
-                String title = matchGroups.get(i)[1];
-
-                // Remove trailing dots/dashes from title
-                title = title.replaceAll("[.\\-–—]+$", "").trim();
+                String title = matchGroups.get(i)[1].replaceAll("[.\\-–—]+$", "").trim();
 
                 String id = actAbbrev + "_" + sectionNum;
-                LegalDocument doc = new LegalDocument(id, actName, sectionNum, title, content, sourceFile);
-                docs.add(doc);
+                currentDocs.add(new LegalDocument(id, actName, sectionNum, title, content, sourceFile));
             }
 
-            if (!docs.isEmpty()) break; // First successful pattern wins
+            // We want the pattern that matches the MOST distinct sections. 
+            // This prevents a single random match from overriding the page fallbacks.
+            if (currentDocs.size() > bestDocs.size()) {
+                bestDocs = currentDocs;
+            }
         }
 
-        return docs;
+        return bestDocs;
     }
 
     // ======================================================================

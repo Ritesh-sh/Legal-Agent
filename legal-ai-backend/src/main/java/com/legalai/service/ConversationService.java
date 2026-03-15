@@ -61,4 +61,14 @@ public class ConversationService {
     public boolean sessionExists(String sessionId) {
         return sessions.containsKey(sessionId);
     }
+
+    public String getLastUserQuery(String sessionId) {
+        List<ChatMessage> history = getHistory(sessionId);
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if ("user".equals(history.get(i).getRole())) {
+                return history.get(i).getContent();
+            }
+        }
+        return "";
+    }
 }

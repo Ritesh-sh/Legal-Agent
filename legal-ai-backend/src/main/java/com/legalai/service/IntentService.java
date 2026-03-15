@@ -107,7 +107,10 @@ public class IntentService {
             "mediator", "settlement",
             "partnership", "partner", "firm",
             "goods", "buyer", "seller", "delivery",
-            "special marriage", "coparcener"
+            "special marriage", "coparcener",
+
+            // Common conversational legal follow-ups
+            "documents", "document", "case", "cases", "procedure", "applicable"
     );
 
     // Patterns that strongly indicate legal queries
