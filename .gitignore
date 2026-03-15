@@ -1,0 +1,60 @@
+# ======================================================================
+# IDEs and Editors
+# ======================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+.project
+.classpath
+.settings/
+
+# ======================================================================
+# OS Generated Files
+# ======================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ======================================================================
+# Backend (Spring Boot / Maven)
+# ======================================================================
+legal-ai-backend/target/
+legal-ai-backend/logs/
+legal-ai-backend/.mvn/
+legal-ai-backend/mvnw
+legal-ai-backend/mvnw.cmd
+legal-ai-backend/*.log
+
+# Environment Setup
+legal-ai-backend/.env
+legal-ai-backend/.env.*
+!legal-ai-backend/.env.example
+
+# Do not commit the PDFs if you don't want them in git, uncomment the line below:
+# legal-ai-backend/legal_acts/*.pdf
+
+# ======================================================================
+# Frontend (Vite / React / Node)
+# ======================================================================
+legal-ai-frontend/node_modules/
+legal-ai-frontend/dist/
+legal-ai-frontend/dist-ssr/
+legal-ai-frontend/*.local
+legal-ai-frontend/.npm/
+
+# Environment files
+legal-ai-frontend/.env
+legal-ai-frontend/.env.*
+!legal-ai-frontend/.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
